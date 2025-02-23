@@ -35,7 +35,10 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(PicoPomodoro PicoPomodoro.c )
+add_executable(PicoPomodoro 
+PicoPomodoro.c  
+inc/ssd1306.c
+inc/matriz.c) 
 
 pico_set_program_name(PicoPomodoro "PicoPomodoro")
 pico_set_program_version(PicoPomodoro "0.1")
@@ -55,8 +58,12 @@ target_include_directories(PicoPomodoro PRIVATE
 
 # Add any user requested libraries
 target_link_libraries(PicoPomodoro 
-        
+        hardware_i2c
+        hardware_pio
+        hardware_clocks
+        hardware_adc
         )
 
 pico_add_extra_outputs(PicoPomodoro)
+pico_generate_pio_header(PicoPomodoro ${CMAKE_CURRENT_LIST_DIR}/pio_matrix.pio)
 
