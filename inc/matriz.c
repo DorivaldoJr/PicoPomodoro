@@ -1,6 +1,7 @@
 #include "matriz.h"
 #include "pico/stdlib.h" // Se precisar de funções como sleep_ms()
 
+
 // Array com a representação dos números 0-9 (25 elementos por número)
 double numeros[10][25] = {
     {0,1,1,1,0, 
@@ -75,7 +76,7 @@ uint32_t matrix_rgb(double r, double g, double b) {
 void animacao_inicio(PIO pio, uint sm) {
     // Animação em um vetor único: 6 frames, cada um com 25 pixels (5x5)
     // Os valores: 0 = LED apagado, 1 = LED aceso.
-    int animacao[6 * 25] = {
+    int animacao[8 * 25] = {
         // Frame 0: Apenas o centro (índice 12)
          0,0,0,0,0,
          0,0,0,0,0,
@@ -112,18 +113,32 @@ void animacao_inicio(PIO pio, uint sm) {
          0,0,0,0,0,
          
         // Frame 5: Carinha feliz
-         0,1,1,1,0,   // olhos (row 0)
-         1,0,0,0,1,   // row 1
-         0,0,0,0,0,   // row 2
-         1,1,0,1,1,   // boca com os cantos (row 3)
-         0,1,0,1,0    // sorriso (row 4)
+         0,1,1,1,0,   
+         1,0,0,0,1,   
+         0,0,1,0,0,   
+         0,0,0,0,0,  
+         0,1,0,1,0,   
+
+         // Frame 6: Carinha feliz piscando
+         0,1,1,1,0,   
+         1,0,0,0,1,   
+         0,0,1,0,0,   
+         0,0,0,0,0,
+         0,0,0,1,0,
+
+         // Frame 7: Carinha feliz
+         0,1,1,1,0,   
+         1,0,0,0,1,   
+         0,0,1,0,0,   
+         0,0,0,0,0,  
+         0,1,0,1,0, 
     };
 
     // Define a cor verde com metade da intensidade
     uint32_t led_on  = matrix_rgb(0.0, 0.3, 0.0);
     uint32_t led_off = matrix_rgb(0.0, 0.0, 0.0);
 
-    int num_frames = 6;
+    int num_frames = 8;
     int pixels_per_frame = 25;
 
     // Percorre cada frame da animação
@@ -136,11 +151,14 @@ void animacao_inicio(PIO pio, uint sm) {
                 pio_sm_put_blocking(pio, sm, led_off);
         }
         sleep_ms(200);  // Pausa entre frames (ajuste se necessário)
+        
     }
 
     // Mantém a carinha feliz acesa por 1 segundo
     sleep_ms(1000);
-
+    for (int j = 0; j < pixels_per_frame; j++) {
+    pio_sm_put_blocking(pio, sm, led_off);
+}
 }
 // Função para atualizar a matriz de LEDs com um número (cor vermelha, por exemplo)
 void atualiza_display(int numero, PIO pio, uint sm) {
@@ -150,3 +168,5 @@ void atualiza_display(int numero, PIO pio, uint sm) {
         pio_sm_put_blocking(pio, sm, valor_led);
     }
 }
+
+

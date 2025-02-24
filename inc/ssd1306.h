@@ -1,6 +1,22 @@
+#ifndef SSD1306_H
+#define SSD1306_H
+
 #include <stdlib.h>
+#include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
+
+typedef struct {
+    uint8_t width, height, pages, address;
+    i2c_inst_t *i2c_port;
+    bool external_vcc;
+    uint8_t *ram_buffer;
+    size_t bufsize;
+    uint8_t port_buffer[2];
+} ssd1306_t;
+
+extern ssd1306_t ssd; // Declaração externa se for usar em múltiplos arquivos
+
 
 #define WIDTH 128
 #define HEIGHT 64
@@ -25,14 +41,6 @@ typedef enum {
   SET_CHARGE_PUMP = 0x8D
 } ssd1306_command_t;
 
-typedef struct {
-  uint8_t width, height, pages, address;
-  i2c_inst_t *i2c_port;
-  bool external_vcc;
-  uint8_t *ram_buffer;
-  size_t bufsize;
-  uint8_t port_buffer[2];
-} ssd1306_t;
 
 void ssd1306_init(ssd1306_t *ssd, uint8_t width, uint8_t height, bool external_vcc, uint8_t address, i2c_inst_t *i2c);
 void ssd1306_config(ssd1306_t *ssd);
@@ -49,3 +57,6 @@ void ssd1306_draw_char(ssd1306_t *ssd, char c, uint8_t x, uint8_t y);
 void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y);
 void ssd1306_draw_char_min(ssd1306_t *ssd, char c, uint8_t x, uint8_t y);
 void ssd1306_draw_string_min(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y);
+void atualiza_exibicao_selecao(ssd1306_t *ssd, const char *titulo, const char *opcao);
+
+#endif // SSD1306_H

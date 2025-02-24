@@ -38,7 +38,8 @@ pico_sdk_init()
 add_executable(PicoPomodoro 
 PicoPomodoro.c  
 inc/ssd1306.c
-inc/matriz.c) 
+inc/matriz.c
+inc/buzzer.c) 
 
 pico_set_program_name(PicoPomodoro "PicoPomodoro")
 pico_set_program_version(PicoPomodoro "0.1")
@@ -62,6 +63,7 @@ target_link_libraries(PicoPomodoro
         hardware_pio
         hardware_clocks
         hardware_adc
+        hardware_pwm
         )
 
 pico_add_extra_outputs(PicoPomodoro)

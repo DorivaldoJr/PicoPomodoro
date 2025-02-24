@@ -1,5 +1,8 @@
-#include "ssd1306.h"
+#include "inc/ssd1306.h"
 #include "font.h"
+
+
+
 
 void ssd1306_init(ssd1306_t *ssd, uint8_t width, uint8_t height, bool external_vcc, uint8_t address, i2c_inst_t *i2c) {
   ssd->width = width;
@@ -225,4 +228,14 @@ void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y) 
             break;
         ++str;
     }
+}
+
+// Funcao para atualizar o display a cada interacao com o analogico, colocando resposta em tempo real
+void atualiza_exibicao_selecao(ssd1306_t *ssd, const char *titulo, const char *opcao) {
+    char buf[32];
+    sprintf(buf, "%s", titulo);
+    ssd1306_draw_string(ssd, buf, 11, 22);
+    sprintf(buf, "%s", opcao);
+    ssd1306_draw_string(ssd, buf, 65, 22);
+    ssd1306_send_data(ssd);
 }
