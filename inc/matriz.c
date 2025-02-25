@@ -1,6 +1,9 @@
 #include "matriz.h"
 #include "pico/stdlib.h" // Se precisar de funções como sleep_ms()
 
+uint led_steps = 0;
+uint led_max_steps = 25;
+uint32_t led_buffer[25];  // Define o buffer dos LEDs
 
 // Array com a representação dos números 0-9 (25 elementos por número)
 double numeros[10][25] = {
@@ -167,6 +170,24 @@ void atualiza_display(int numero, PIO pio, uint sm) {
         valor_led = matrix_rgb(numeros[numero][i], 0.0, 0.0); // Assume cor vermelha 
         pio_sm_put_blocking(pio, sm, valor_led);
     }
+}
+
+uint32_t led_buffer[NUM_PIXELS] = {0};  // Buffer para armazenar estado dos LEDs
+static uint led_index = 0;  // Índice do LED atual
+
+// Função para atualizar a matriz de LEDs
+void update_led_matrix() {
+    for (int i = 0; i < NUM_PIXELS; i++) {
+        pio_sm_put_blocking(pio_global, matrix_sm_global, led_buffer[i]);
+    }
+}
+
+// Função para acender LEDs um por vez em sequência
+void acender_led_sequencialmente() {
+    if (led_steps < NUM_PIXELS) {
+        led_buffer[led_steps] = matrix_rgb(0.0, 0.2, 0.0);  // Define cor verde para o LED atual
+        update_led_matrix();
+    } 
 }
 
 

@@ -8,7 +8,12 @@
 #include "hardware/pio.h"
 #include "pio_matrix.pio.h"
 #include "hardware/adc.h"
-#include "inc/buzzer.h"
+#include "hardware/watchdog.h"
+
+static alarm_id_t alarm_leds = 0;  // ID do alarme para os LEDs
+
+  
+static bool timer_ativo = false;  // Flag para indicar se o timer está rodando
 
 // Macros I2c
 #define I2C_PORT i2c1
@@ -20,7 +25,9 @@
 #define NUM_PIXELS 25 //matriz led
 #define OUT_PIN 7 // matriz led
 
-#define BUZZER_PIN 21 // PINO DO BUZZER
+PIO pio_global;         
+uint matrix_sm_global;  
+
 
 // Macros botoes e led RGB
 #define BUTTON_JOY 22
@@ -43,9 +50,8 @@ ssd1306_t ssd; // Inicializa a estrutura do display, esta aqui para facilitar a 
 
 static volatile uint estudo = 0; // Variavel de controle para contar os timers de estudo
 static volatile uint repouso = 0; // Variavel de controle para contar os timers de repouso
+static alarm_id_t alarm_estudo = 0;
 
-PIO pio_global; // Variavel global para acesso ao PIO pelas interrupcoes
-uint matrix_sm_global; // Variavel global para acesso as maquinas de estado pelas interrupcoes
 
 
 void setup_led_buttons (){
@@ -92,6 +98,7 @@ uint64_t tempo_descanso_config = 0; // Valor final em microsegundos para pausa c
 // Funcao para configurar o tempo dos ciclos de estudo e o tempo de cada pausa pelo usuario
 // Utiliza o joystick no eixo y para selecionar o tempo de cada ciclo 
 void configurar_tempos(void) {
+
     char buf[32];  // Buffer para sprintf
 
     // -------------------------------------------
@@ -207,18 +214,45 @@ void configurar_tempos(void) {
     
 } // fim do lop de configuracao 
 
-static volatile bool fim = false;
+int64_t led_callback(alarm_id_t id, void *user_data) {
+    if (led_steps < led_max_steps) {
+        acender_led_sequencialmente();
+        led_steps++;
+        return (tempo_estudo_config / led_max_steps);
+    }
+
+    // **Apaga os LEDs ao final do estudo**
+    for (int i = 0; i < NUM_PIXELS; i++) {
+        led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);
+    }
+    update_led_matrix();
+
+    led_steps = 0;
+    alarm_leds = 0;
+
+    return 0;
+}
+
+
 
 int64_t timers_callback(alarm_id_t id, void *user_data) {
-    if ((estudo - 1) == 4 && repouso == 3) {
+    if ((estudo ) == 4 && repouso == 3) {
         
+        // **Aqui garantimos que os LEDs apaguem no início da pausa**
+        for (int i = 0; i < NUM_PIXELS; i++) {
+            led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);  // Apaga todos os LEDs
+        }
         ssd1306_fill(&ssd, false);
         ssd1306_rect(&ssd,0,0,128,64,true,false);
         ssd1306_draw_string(&ssd, "PARABENS!",3, 8);
-        ssd1306_draw_string(&ssd, "Fim dos 4 ciclos",3, 18);
-        ssd1306_draw_string(&ssd, "Fim do Pomodoro",13, 28);
+        
+        ssd1306_draw_string(&ssd, "Fim do Pomodoro",3, 18);
+        ssd1306_draw_string(&ssd, "Aperte B para",3, 38);
+        ssd1306_draw_string(&ssd, "recomecar",3, 48);
         ssd1306_send_data(&ssd);
-        fim = true;
+        timer_ativo = false;
+        animacao_inicio(pio_global,matrix_sm_global);
+       
         return -1;
     }
     
@@ -231,6 +265,11 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_draw_string(&ssd, "Bom descanso!",14, 38);
         ssd1306_send_data(&ssd);
         repouso++;
+        // **Aqui garantimos que os LEDs apaguem no início da pausa**
+        for (int i = 0; i < NUM_PIXELS; i++) {
+            led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);  // Apaga todos os LEDs
+        }
+        update_led_matrix();  // Atualiza a matriz para refletir o desligamento
         return tempo_descanso_config;
     }
 
@@ -264,6 +303,11 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_send_data(&ssd);
         
         }
+        // **Inicia o cronômetro dos LEDs SOMENTE no estudo**
+        if (alarm_leds == 0) {
+            led_steps = 0;
+            alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
+        }
         
         return tempo_estudo_config;
     }
@@ -271,25 +315,51 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
     return 0;
 }
 
-void callback_button_A(uint gpio, uint32_t events) {
+
+
+
+void callback_button(uint gpio, uint32_t events) {
     static uint32_t last_time_A = 0;
-    uint32_t current_time_A = to_us_since_boot(get_absolute_time());
-    if (current_time_A - last_time_A > 200000) {
-        last_time_A = current_time_A;
+    static uint32_t last_time_B = 0;
+    uint32_t current_time = to_us_since_boot(get_absolute_time());
+    if(gpio == BUTTON_A){
+        if (current_time - last_time_A > 200000) {
+            last_time_A = current_time;
+            
+            ssd1306_fill(&ssd, false);
+            ssd1306_rect(&ssd,0,0,128,64,true,false);
+            ssd1306_draw_string(&ssd, "Primeiro timer",9, 18);
+            ssd1306_draw_string(&ssd, "Iniciado",32, 28);
+            ssd1306_draw_string(&ssd, "Bons estudos",16, 38);
+            ssd1306_send_data(&ssd);
+            estudo = 1;
+            repouso = 0;
+            timer_ativo = true;  // Agora o timer está ativo
+
+            alarm_estudo = add_alarm_in_us(tempo_estudo_config, timers_callback, NULL, true);
+            
+            // **Ativa LEDs somente se não estiverem rodando**
+            if (alarm_leds == 0) {
+                led_steps = 0;
+                alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
+            }
+            
+        }
+    } 
+     if (gpio == BUTTON_B){
+
+        if (current_time - last_time_B > 200000) { // Debounce de 200 ms
+        last_time_B = current_time;
+    
+        watchdog_reboot(0, 0, 0);
         
-        ssd1306_fill(&ssd, false);
-        ssd1306_rect(&ssd,0,0,128,64,true,false);
-        ssd1306_draw_string(&ssd, "Primeiro timer",9, 18);
-        ssd1306_draw_string(&ssd, "Iniciado",32, 28);
-        ssd1306_draw_string(&ssd, "Bons estudos",16, 38);
-        ssd1306_send_data(&ssd);
-        estudo = 1;
-        repouso = 0;
-        add_alarm_in_us(tempo_estudo_config, timers_callback, NULL, true);
         
-        
+        }
+
     }
 }
+
+
 
 
 int main()
@@ -311,8 +381,6 @@ int main()
     stdio_init_all(); // Inicializa a comunicacao serial
 
     setup_led_buttons(); // Inicializa os leds e os botoes
-
-    buzzer_init(BUZZER_PIN);
 
     // Inicializa o I2C
     i2c_init(I2C_PORT, 400 * 1000);
@@ -341,14 +409,21 @@ int main()
     configurar_tempos();
 
     // Interrupcao do botao A para iniciar o timer
-    gpio_set_irq_enabled_with_callback(BUTTON_A,GPIO_IRQ_EDGE_FALL, true, &callback_button_A);
+    gpio_set_irq_enabled_with_callback(BUTTON_A,GPIO_IRQ_EDGE_FALL, true, &callback_button);
+     gpio_set_irq_enabled_with_callback(BUTTON_B, GPIO_IRQ_EDGE_FALL, true, &callback_button);
+  
     while (true) {
-        if (fim){
-            buzzer_musiquinha();
-            animacao_inicio(pio,sm);
-            sleep_ms(2000);
+    if (timer_ativo) {  
+        if (estudo > repouso) {
+            // **Não inicializa LEDs no descanso**
+        } else if (estudo == repouso) {
+            if (alarm_leds == 0) {
+                led_steps = 0;
+                alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
+            }
         }
-        tight_loop_contents();
+    }
+    tight_loop_contents();
     }
     
     return 0;
