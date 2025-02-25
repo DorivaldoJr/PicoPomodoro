@@ -251,10 +251,8 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_draw_string(&ssd, "Aperte B para",3, 38);
         ssd1306_draw_string(&ssd, "recomecar",3, 48);
         ssd1306_send_data(&ssd);
-        timer_ativo = false; // Para o loop do timer dos leds
-        animacao_inicio(pio_global,matrix_sm_global); // Animacao de explosao para parabenizar o usuario
-       
-        return -1; // retorna -1 para encerrar os timers
+        
+        return 0; // retorna -1 para encerrar os timers
     }
     
     if (estudo > repouso) { // Se o numero de ciclos de estudo for maior que o de repouso ele gera um ciclo de repouso
