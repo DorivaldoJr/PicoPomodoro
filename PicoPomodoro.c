@@ -10,10 +10,6 @@
 #include "hardware/adc.h"
 #include "hardware/watchdog.h"
 
-static alarm_id_t alarm_leds = 0;  // ID do alarme para os LEDs
-
-  
-static bool timer_ativo = false;  // Flag para indicar se o timer está rodando
 
 // Macros I2c
 #define I2C_PORT i2c1
@@ -22,12 +18,8 @@ static bool timer_ativo = false;  // Flag para indicar se o timer está rodando
 #define endereco 0x3C
 
 // Macros Matriz led's
-#define NUM_PIXELS 25 //matriz led
-#define OUT_PIN 7 // matriz led
-
-PIO pio_global;         
-uint matrix_sm_global;  
-
+#define NUM_PIXELS 25 
+#define OUT_PIN 7 
 
 // Macros botoes e led RGB
 #define BUTTON_JOY 22
@@ -38,22 +30,28 @@ uint matrix_sm_global;
 
 #define VRY_PIN 27 // Pino para o ADC no eixo y
 
-#define TIME_25_MIN_US_ESTUDO 1500000000ULL // 25 min convertidos para microsegundos
-#define TIME_30_MIN_US_ESTUDO 1800000000ULL // 30 min convertidos para microsegundos
-#define TIME_35_MIN_US_ESTUDO 2100000000ULL // 35 min convertidos para microsegundos
+#define TIME_25_MIN_US_ESTUDO (25ULL * 60ULL * 1000000ULL) // 25 min em microsegundos
+#define TIME_30_MIN_US_ESTUDO (30ULL * 60ULL * 1000000ULL) // 30 min em microsegundos
+#define TIME_35_MIN_US_ESTUDO (35ULL * 60ULL * 1000000ULL) // 35 min em microsegundos
 #define TIME_PAUSA_CURTA_5_MIN_US   (5ULL * 60ULL * 1000000ULL)   // 5 minutos para micro segundos
 #define TIME_PAUSA_CURTA_10_MIN_US   (10ULL * 60ULL * 1000000ULL)  // 10 min para micro segundos
 #define TIME_PAUSA_CURTA_15_MIN_US   (15ULL * 60ULL * 1000000ULL)  // 15 min para micro segundos
 
-
+// Variaveis globais para uso geral das funcoes
+PIO pio_global;         
+uint matrix_sm_global;  
 ssd1306_t ssd; // Inicializa a estrutura do display, esta aqui para facilitar a chamada e reduzir erros de compilacao
 
 static volatile uint estudo = 0; // Variavel de controle para contar os timers de estudo
 static volatile uint repouso = 0; // Variavel de controle para contar os timers de repouso
-static alarm_id_t alarm_estudo = 0;
+static alarm_id_t alarm_estudo = 0; // ID do alarme para o timer de estudo
+static alarm_id_t alarm_leds = 0;  // ID do alarme para os LEDs
+static bool timer_ativo = false;  // Flag para indicar se o timer está rodando
+uint64_t tempo_estudo_config = 0;   // Valor final em microsegundos para ciclo de estudo
+uint64_t tempo_descanso_config = 0; // Valor final em microsegundos para pausa curta
 
 
-
+// Funcao para iniciar e configurar os botoes e led's
 void setup_led_buttons (){
     // Configuração do botão do joystick
     gpio_init(BUTTON_JOY);
@@ -75,7 +73,8 @@ void setup_led_buttons (){
     gpio_set_dir(LED_RED, GPIO_OUT);
 }
 
-void setup_inicialicacao_softaware (PIO pio, uint sm){ // Inicializa o softaware com as boas vindas e instrucoes para o usuario 
+// Inicializa o softaware com as boas vindas e instrucoes para o usuario 
+void setup_inicialicacao_softaware (PIO pio, uint sm){ 
     // Inicializcao serial
     printf("Bem vindo ao PicoPomodoro!\n"); 
     // Inicializacao via Display
@@ -89,11 +88,6 @@ void setup_inicialicacao_softaware (PIO pio, uint sm){ // Inicializa o softaware
    // Inicializacao pela matriz de leds
     animacao_inicio(pio, sm);
 }
-
-
-uint64_t tempo_estudo_config = 0;   // Valor final em microsegundos para ciclo de estudo
-uint64_t tempo_descanso_config = 0; // Valor final em microsegundos para pausa curta
-
 
 // Funcao para configurar o tempo dos ciclos de estudo e o tempo de cada pausa pelo usuario
 // Utiliza o joystick no eixo y para selecionar o tempo de cada ciclo 
@@ -157,7 +151,7 @@ void configurar_tempos(void) {
     // ** Bloco 2: Configurar tempo de descanso curto **
     // -------------------------------------------------
     uint indice_descanso = 1;  // 1 => 5 min, 2 => 10 min, 3 => 15 min. Indice do vetor com os tempos
-    const uint64_t opcoes_descanso[3] = { 5ULL * 60ULL * 1000000ULL, 10ULL * 60ULL * 1000000ULL, 15ULL * 60ULL * 1000000ULL }; // Vetor com os tempos convertidos
+    const uint64_t opcoes_descanso[3] = { TIME_PAUSA_CURTA_5_MIN_US, TIME_PAUSA_CURTA_10_MIN_US, TIME_PAUSA_CURTA_15_MIN_US}; // Vetor com os tempos convertidos
     const char *texto_descanso[3] = { "05 min", "10 min", "15 min" }; // Vetor com os tempos escritos para o display
 
     atualiza_exibicao_selecao(&ssd, "Pausa:", texto_descanso[indice_descanso - 1]); // Atualizacao com tempo defaut de 5 min
@@ -214,69 +208,81 @@ void configurar_tempos(void) {
     
 } // fim do lop de configuracao 
 
+// Calback da funcao de alarme dos leds da matriz de led, que e acionado para servir de cronometro acendendo ao passar do tempo um led de cada vez
+// A matriz so acende nos ciclos de estudo que sao mais demorados
+// Analisa se os led's ainda precisam ser acesos ou se ja foram todos acessos e chama a funacao de acender ou a de apagar
 int64_t led_callback(alarm_id_t id, void *user_data) {
+    // Verifica se ainda há LEDs para acender no ciclo atual
     if (led_steps < led_max_steps) {
-        acender_led_sequencialmente();
-        led_steps++;
+        acender_led_sequencialmente(); // Acende um LED na matriz de forma sequencial
+        led_steps++; // Incrementa o contador de LEDs acesos
+
+        // Retorna o tempo até o próximo LED ser acionado, distribuindo o tempo do estudo igualmente entre os LEDs
         return (tempo_estudo_config / led_max_steps);
     }
 
-    // **Apaga os LEDs ao final do estudo**
+    // **Se todos os LEDs já foram acesos, apaga tudo ao final do estudo**
     for (int i = 0; i < NUM_PIXELS; i++) {
-        led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);
+        led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);  // Define todos os LEDs como apagados (cor preta)
     }
-    update_led_matrix();
+    update_led_matrix();  // Atualiza a matriz de LEDs para refletir as alterações
 
-    led_steps = 0;
-    alarm_leds = 0;
+    // Reinicia os contadores e flags para um novo ciclo
+    led_steps = 0;  // Reseta o contador de LEDs acesos
+    alarm_leds = 0;  // Marca que o alarme dos LEDs foi finalizado
 
-    return 0;
+    return 0;  // Retorna 0 para indicar que o alarme deve ser interrompido
 }
 
-
-
+// Calback para a funcao de alarme dos ciclos de estudo e repouso
 int64_t timers_callback(alarm_id_t id, void *user_data) {
-    if ((estudo ) == 4 && repouso == 3) {
+    if ((estudo ) == 4 && repouso == 3) { // Se o numero de ciclos de estudo for 4 e o de pausas for 3 acaba-se o ciclo pomodoro. Fim do codigo
         
-        // **Aqui garantimos que os LEDs apaguem no início da pausa**
+        gpio_put(LED_GREEN, false);
+        // LEDs apagam no final dos ciclos
         for (int i = 0; i < NUM_PIXELS; i++) {
             led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);  // Apaga todos os LEDs
         }
+        // Mensagem final de parabebens ao usuario por completar o ciclo
         ssd1306_fill(&ssd, false);
         ssd1306_rect(&ssd,0,0,128,64,true,false);
         ssd1306_draw_string(&ssd, "PARABENS!",3, 8);
-        
         ssd1306_draw_string(&ssd, "Fim do Pomodoro",3, 18);
         ssd1306_draw_string(&ssd, "Aperte B para",3, 38);
         ssd1306_draw_string(&ssd, "recomecar",3, 48);
         ssd1306_send_data(&ssd);
-        timer_ativo = false;
-        animacao_inicio(pio_global,matrix_sm_global);
+        timer_ativo = false; // Para o loop do timer dos leds
+        animacao_inicio(pio_global,matrix_sm_global); // Animacao de explosao para parabenizar o usuario
        
-        return -1;
+        return -1; // retorna -1 para encerrar os timers
     }
     
-    if (estudo > repouso) {
-        
+    if (estudo > repouso) { // Se o numero de ciclos de estudo for maior que o de repouso ele gera um ciclo de repouso
+        gpio_put(LED_RED, true); // Led vermelho indica a pausa
+        gpio_put(LED_GREEN, false);
+
         ssd1306_fill(&ssd, false);
         ssd1306_rect(&ssd,0,0,128,64,true,false);
         ssd1306_draw_string(&ssd, "Timer de pausa",9, 18);
         ssd1306_draw_string(&ssd, "Iniciado!",32, 28);
         ssd1306_draw_string(&ssd, "Bom descanso!",14, 38);
         ssd1306_send_data(&ssd);
-        repouso++;
-        // **Aqui garantimos que os LEDs apaguem no início da pausa**
+        repouso++; // incrementa a variavel para a proxima iteracao
+
+        // Os LEDs apagam no início da pausa
         for (int i = 0; i < NUM_PIXELS; i++) {
             led_buffer[i] = matrix_rgb(0.0, 0.0, 0.0);  // Apaga todos os LEDs
         }
         update_led_matrix();  // Atualiza a matriz para refletir o desligamento
-        return tempo_descanso_config;
+        return tempo_descanso_config; // Retorna o tempo de descanso configurado pelo usuario para o ciclo comecar
     }
 
-    if (estudo == repouso) {
-        estudo++;
+    if (estudo == repouso) { // Se o numero de repouso for igual ao de estudo ele adiciona mais um ciclo de estudo
+        estudo++; // Incrementa a variavel de estudo para a preoxima iteracao
+        gpio_put(LED_GREEN, true); // Led verde indica o ciclo de estudo
+        gpio_put(LED_RED, false);
         switch (estudo){
-         case 2 :
+         case 2 : // No segundo ciclo muda o retorno via display para o usuario ver em qual ciclo esta
         ssd1306_fill(&ssd, false);
         ssd1306_rect(&ssd,0,0,128,64,true,false);
         ssd1306_draw_string(&ssd, "Segundo timer",9, 18);
@@ -285,7 +291,7 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_send_data(&ssd);
         
         break;
-        case 3 :
+        case 3 : // No terceiro ciclo muda o retorno via display para o usuario ver em qual ciclo esta
         ssd1306_fill(&ssd, false);
         ssd1306_rect(&ssd,0,0,128,64,true,false);
         ssd1306_draw_string(&ssd, "Terceiro timer",9, 18);
@@ -294,7 +300,7 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_send_data(&ssd);
         
         break;
-        case 4 :
+        case 4 : // No quarto ciclo muda o retorno via display para o usuario ver em qual ciclo esta
         ssd1306_fill(&ssd, false);
         ssd1306_rect(&ssd,0,0,128,64,true,false);
         ssd1306_draw_string(&ssd, "Ultimo timer",13, 18);
@@ -303,13 +309,17 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_send_data(&ssd);
         
         }
-        // **Inicia o cronômetro dos LEDs SOMENTE no estudo**
+
+         // **Zera o contador de LEDs para um novo estudo**
+         led_steps = 0;
+         
+        // Inicia o cronômetro dos LEDs SOMENTE no estudo
         if (alarm_leds == 0) {
             led_steps = 0;
             alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
         }
         
-        return tempo_estudo_config;
+        return tempo_estudo_config; // Retorna o tempo de estudo para inicio do timer
     }
 
     return 0;
@@ -319,43 +329,51 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
 
 
 void callback_button(uint gpio, uint32_t events) {
-    static uint32_t last_time_A = 0;
-    static uint32_t last_time_B = 0;
-    uint32_t current_time = to_us_since_boot(get_absolute_time());
-    if(gpio == BUTTON_A){
-        if (current_time - last_time_A > 200000) {
-            last_time_A = current_time;
+    static uint32_t last_time_A = 0;  // Armazena o último tempo em que o botão A foi pressionado (para debounce)
+    static uint32_t last_time_B = 0;  // Armazena o último tempo em que o botão B foi pressionado (para debounce)
+    uint32_t current_time = to_us_since_boot(get_absolute_time());  // Obtém o tempo atual em microssegundos
+
+    // Se o botão pressionado for o botão A:
+    if (gpio == BUTTON_A) {
+        // Verifica se passaram pelo menos 200ms desde a última pressão (evita múltiplas ativações devido ao bounce)
+        if (current_time - last_time_A > 200000) { 
+            last_time_A = current_time;  // Atualiza o tempo da última pressão do botão A
             
+            // Atualiza o display OLED com a mensagem de início do primeiro ciclo de estudo
             ssd1306_fill(&ssd, false);
             ssd1306_rect(&ssd,0,0,128,64,true,false);
             ssd1306_draw_string(&ssd, "Primeiro timer",9, 18);
             ssd1306_draw_string(&ssd, "Iniciado",32, 28);
             ssd1306_draw_string(&ssd, "Bons estudos",16, 38);
             ssd1306_send_data(&ssd);
-            estudo = 1;
-            repouso = 0;
-            timer_ativo = true;  // Agora o timer está ativo
 
-            alarm_estudo = add_alarm_in_us(tempo_estudo_config, timers_callback, NULL, true);
-            
-            // **Ativa LEDs somente se não estiverem rodando**
-            if (alarm_leds == 0) {
-                led_steps = 0;
-                alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
+            if (!timer_ativo) { // Só inicia se o timer ainda não estiver ativo, para evitar multiplas ativacoes
+                estudo = 1;
+                repouso = 0;
+                timer_ativo = true;
+                alarm_estudo = add_alarm_in_us(tempo_estudo_config, timers_callback, NULL, true); // Configura o alarme para contar o tempo do estudo
+                // Acende o LED verde e apaga o LED vermelho, indicando que o estudo começou
+                gpio_put(LED_GREEN, true);
+                gpio_put(LED_RED, false);
             }
             
+            // Ativa o controle sequencial dos LEDs apenas se não estiver rodando
+            if (alarm_leds == 0) {
+                led_steps = 0;  // Reinicia a contagem dos LEDs
+                alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
+            }
         }
     } 
-     if (gpio == BUTTON_B){
 
-        if (current_time - last_time_B > 200000) { // Debounce de 200 ms
-        last_time_B = current_time;
-    
-        watchdog_reboot(0, 0, 0);
-        
-        
+    // Se o botão pressionado for o botão B:
+    if (gpio == BUTTON_B) { // O botao B serve para reiniciar o codigo para que o usuario configure novos tempos 
+        // Verifica se passaram pelo menos 200ms desde a última pressão (evita múltiplas ativações)
+        if (current_time - last_time_B > 200000) { 
+            last_time_B = current_time;  // Atualiza o tempo da última pressão do botão B
+
+            // Reinicia o sistema utilizando o watchdog
+            watchdog_reboot(0, 0, 0);
         }
-
     }
 }
 
@@ -415,15 +433,15 @@ int main()
     while (true) {
     if (timer_ativo) {  
         if (estudo > repouso) {
-            // **Não inicializa LEDs no descanso**
+            //Não  inicializa LEDs no descanso
         } else if (estudo == repouso) {
             if (alarm_leds == 0) {
                 led_steps = 0;
-                alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false);
+                alarm_leds = add_alarm_in_us(tempo_estudo_config / led_max_steps, led_callback, NULL, false); // Chama a funcao para ligar a matriz de leds
             }
         }
     }
-    tight_loop_contents();
+    tight_loop_contents(); // Para que o sistema nao gere bugs enquanto estiver ocioso
     }
     
     return 0;

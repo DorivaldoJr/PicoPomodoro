@@ -6,7 +6,7 @@
 extern PIO pio_global; // Variavel global para acesso ao PIO pelas interrupcoes
 extern uint matrix_sm_global; // Variavel global para acesso as maquinas de estado pelas interrupcoes
 extern uint led_steps;          // Contador de quantos LEDs já acenderam
-extern uint led_max_steps;
+extern uint led_max_steps;     // Contador de leds maximos para acender
 extern uint32_t led_buffer[];  // Buffer para os LEDs
 
 #define NUM_PIXELS 25 //matriz led
