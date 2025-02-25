@@ -252,7 +252,7 @@ int64_t timers_callback(alarm_id_t id, void *user_data) {
         ssd1306_draw_string(&ssd, "recomecar",3, 48);
         ssd1306_send_data(&ssd);
         
-        return 0; // retorna -1 para encerrar os timers
+        return -1; // retorna -1 para encerrar os timers
     }
     
     if (estudo > repouso) { // Se o numero de ciclos de estudo for maior que o de repouso ele gera um ciclo de repouso
